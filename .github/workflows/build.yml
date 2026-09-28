@@ -1,0 +1,41 @@
+name: Third-Party Build
+
+on:
+  push:
+
+jobs:
+  linux:
+    name: Linux builds with ${{ matrix.toolchain.name }} ${{ matrix.toolchain.version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        toolchain:
+          - { name: "LLVM/Clang", compiler: llvm, version: 22, cc: clang, cxx: clang++ }
+          - { name: "GNU GCC",    compiler: gcc,  version: 14, cc: gcc,   cxx: g++ }
+
+    steps:
+      - name: Download scripts and patches
+        uses: actions/checkout@v7
+
+      - name: Install C/C++
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: ${{ matrix.toolchain.compiler }}-${{ matrix.toolchain.version }}
+
+      - name: Build packages
+        run: |
+            export THIRD_PARTY_C_COMPILER=${{ matrix.toolchain.cc }}-${{ matrix.toolchain.version }}
+            export THIRD_PARTY_CXX_COMPILER=${{ matrix.toolchain.cxx }}-${{ matrix.toolchain.version }}
+            export THIRD_PARTY_SUFFIX_NAME=${{ matrix.toolchain.compiler }}-${{ matrix.toolchain.version }}
+            ./BuildAllPackages.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages-${{ matrix.toolchain.compiler }}-${{ matrix.toolchain.version }}
+          path: '*.zip'
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

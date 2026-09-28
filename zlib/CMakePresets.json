@@ -1,0 +1,40 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 10,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "zlib-Base",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "OFF",
+                "ZLIB_BUILD_TESTING": "OFF",
+                "ZLIB_BUILD_SHARED": "OFF"
+            }
+        },
+        {
+            "name": "zlib-Release",
+            "inherits": "zlib-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "zlib-Debug",
+            "inherits": "zlib-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "zlib-Sanitized",
+            "inherits": "zlib-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BUILD_WITH_SANITIZERS": "ON"
+            }
+        }
+    ]
+}

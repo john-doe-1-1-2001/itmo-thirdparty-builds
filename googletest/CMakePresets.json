@@ -1,0 +1,39 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 10,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "GoogleTest-Base",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "OFF",
+                "BUILD_GMOCK": "OFF"
+            }
+        },
+        {
+            "name": "GoogleTest-Release",
+            "inherits": "GoogleTest-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "GoogleTest-Debug",
+            "inherits": "GoogleTest-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "GoogleTest-Sanitized",
+            "inherits": "GoogleTest-Base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BUILD_WITH_SANITIZERS": "ON"
+            }
+        }
+    ]
+}
