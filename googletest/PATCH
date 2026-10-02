@@ -1,53 +1,179 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 793c8d3c..b557de5f 100644
+index 793c8d3c..5a71ebc2 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -20,6 +20,10 @@ option(BUILD_GMOCK "Builds the googlemock subproject" ON)
  option(INSTALL_GTEST "Enable installation of googletest. (Projects embedding googletest may want to turn this OFF.)" ON)
  option(GTEST_HAS_ABSL "Use Abseil and RE2. Requires Abseil and RE2 to be separately added to the build." OFF)
  
-+### === EXTERNAL CHANGES ===
++# Begin of third-party builds patch
 +option(BUILD_WITH_SANITIZERS "Builds subprojects with available sanitizers." OFF)
-+### === EXTERNAL CHANGES ===
++# end of third-party builds patch
 +
  if(GTEST_HAS_ABSL)
    if(NOT TARGET absl::base)
      find_package(absl REQUIRED)
 diff --git a/googletest/cmake/internal_utils.cmake b/googletest/cmake/internal_utils.cmake
-index 10c55955..c8c59631 100644
+index 10c55955..4ff678d3 100644
 --- a/googletest/cmake/internal_utils.cmake
 +++ b/googletest/cmake/internal_utils.cmake
-@@ -214,6 +214,33 @@ function(cxx_library_with_type name type cxx_flags)
+@@ -167,6 +167,148 @@ macro(config_compiler_and_linker)
+   set(cxx_strict "${cxx_default} ${cxx_strict_flags}")
+ endmacro()
+ 
++# Begin of third-party builds patch
++function(configure_static_thirdparty_target target)
++	if(NOT TARGET "${target}")
++		message(FATAL_ERROR "Unknown target: ${target}")
++	endif()
++
++	get_property(enabled_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
++
++	set(frontend_kind "")
++	set(compiler_description "")
++
++	foreach(language IN ITEMS C CXX)
++		if(NOT language IN_LIST enabled_languages)
++			continue()
++		endif()
++
++		set(id_variable "CMAKE_${language}_COMPILER_ID")
++		set(variant_variable
++		    "CMAKE_${language}_COMPILER_FRONTEND_VARIANT")
++
++		set(compiler_id "${${id_variable}}")
++		set(frontend_variant "${${variant_variable}}")
++
++		string(APPEND compiler_description
++		       " ${language}=${compiler_id}/${frontend_variant}")
++
++		if(compiler_id STREQUAL "MSVC"
++		   OR frontend_variant STREQUAL "MSVC")
++			set(current_frontend "MSVC")
++		elseif(compiler_id MATCHES "^(GNU|Clang|AppleClang)$")
++			set(current_frontend "GNU")
++		else()
++			continue()
++		endif()
++
++		if(frontend_kind
++		   AND NOT "${frontend_kind}" STREQUAL "${current_frontend}")
++			message(
++				FATAL_ERROR
++				"Mixed C/C++ compiler frontends are unsupported:"
++				"${compiler_description}"
++			)
++		endif()
++
++		set(frontend_kind "${current_frontend}")
++	endforeach()
++
++	if(NOT frontend_kind)
++		message(
++			FATAL_ERROR
++			"Unsupported C/C++ compiler:${compiler_description}"
++		)
++	endif()
++
++	if(frontend_kind STREQUAL "MSVC")
++		# Работает также для clang-cl.
++		set_property(
++			TARGET "${target}"
++			PROPERTY MSVC_RUNTIME_LIBRARY
++			         "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
++		)
++
++		target_compile_options(
++			"${target}"
++			PRIVATE
++				"$<$<CONFIG:Debug>:/Od>"
++				"$<$<CONFIG:Debug>:/Ob0>"
++				"$<$<CONFIG:Debug>:/Z7>"
++		)
++
++		if(CMAKE_SIZEOF_VOID_P EQUAL 4)
++			target_compile_options(
++				"${target}"
++				PRIVATE "$<$<CONFIG:Debug>:/Oy->"
++			)
++		endif()
++
++		target_link_options(
++			"${target}"
++			INTERFACE
++				"$<$<CONFIG:Debug>:/DEBUG:FULL>"
++				"$<$<CONFIG:Debug>:/INCREMENTAL:NO>"
++		)
++
++		if(BUILD_WITH_SANITIZERS)
++			target_compile_options(
++				"${target}"
++				PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address>"
++			)
++			target_link_options(
++				"${target}"
++				INTERFACE "$<$<CONFIG:Debug>:/fsanitize=address>"
++			)
++		endif()
++
++	elseif(frontend_kind STREQUAL "GNU")
++		set(debug_information_option -g)
++
++		if(WIN32 AND compiler_description MATCHES "Clang")
++			set(debug_information_option -gcodeview)
++		endif()
++
++		target_compile_options(
++			"${target}"
++			PRIVATE
++				"$<$<CONFIG:Debug>:-O0>"
++				"$<$<CONFIG:Debug>:${debug_information_option}>"
++				"$<$<CONFIG:Debug>:-fno-omit-frame-pointer>"
++				"$<$<CONFIG:Debug>:-fno-optimize-sibling-calls>"
++				"$<$<CONFIG:Debug>:-fno-inline>"
++		)
++
++		if(BUILD_WITH_SANITIZERS)
++			set(enabled_sanitizers address)
++
++			if(NOT WIN32)
++				list(APPEND enabled_sanitizers leak undefined)
++			endif()
++
++			target_compile_options(
++				"${target}"
++				PRIVATE
++					"$<$<CONFIG:Debug>:-fno-sanitize-recover=all>"
++			)
++
++			foreach(sanitizer IN LISTS enabled_sanitizers)
++				target_compile_options(
++					"${target}"
++					PRIVATE
++						"$<$<CONFIG:Debug>:-fsanitize=${sanitizer}>"
++				)
++				target_link_options(
++					"${target}"
++					INTERFACE
++						"$<$<CONFIG:Debug>:-fsanitize=${sanitizer}>"
++				)
++			endforeach()
++		endif()
++	endif()
++endfunction()
++# end of third-party builds patch
++
+ # Defines the gtest & gtest_main libraries. User tests should link
+ # with one of them.
+ function(cxx_library_with_type name type cxx_flags)
+@@ -214,6 +356,10 @@ function(cxx_library_with_type name type cxx_flags)
    endif()
  
    target_compile_features(${name} PUBLIC cxx_std_17)
 +
-+  ### === EXTERNAL CHANGES ===
-+  if(BUILD_WITH_SANITIZERS)
-+    set(compile_option_list "")
-+    set(compile_definition_list "")
-+    set(link_option_list "")
-+
-+    list(APPEND compile_definition_list _DISABLE_STRING_ANNOTATION=1 _DISABLE_VECTOR_ANNOTATION=1)
-+
-+    if(MSVC)
-+      list(APPEND compile_option_list /fsanitize=address)
-+    else()
-+      if(WIN32)
-+        list(APPEND compile_option_list -fsanitize=address)
-+        list(APPEND link_option_list -fsanitize=address)
-+      else()
-+        list(APPEND compile_option_list -fsanitize=address,leak,undefined)
-+        list(APPEND link_option_list -fsanitize=address,leak,undefined)
-+      endif()
-+      list(APPEND compile_option_list -fno-sanitize-recover=all -fno-optimize-sibling-calls -fno-omit-frame-pointer)
-+    endif()
-+
-+    target_compile_options(${name} PUBLIC ${compile_option_list})
-+    target_link_options(${name} PUBLIC ${link_option_list})
-+    target_compile_definitions(${name} PUBLIC ${compile_definition_list})
-+  endif()
-+  ### === EXTERNAL CHANGES ===
++# Begin of third-party builds patch
++  configure_static_thirdparty_target(${name})
++# end of third-party builds patch
  endfunction()
  
  ########################################################################
