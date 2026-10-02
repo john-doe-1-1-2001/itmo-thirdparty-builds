@@ -1,61 +1,165 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index e103c40..d266f46 100644
+index e103c40..204b9f5 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -19,6 +19,10 @@ set(CPACK_RESOURCE_FILE_README ${zlib_SOURCE_DIR}/README)
- # configuration
- # ============================================================================
+@@ -7,6 +7,150 @@ project(
+     HOMEPAGE_URL "https://zlib.net/"
+     DESCRIPTION "a general-purpose lossless data-compression library")
  
-+### === EXTERNAL CHANGES ===
++# Begin of third-party builds patch
 +option(BUILD_WITH_SANITIZERS "Builds subprojects with available sanitizers." OFF)
-+### === EXTERNAL CHANGES ===
 +
- option(ZLIB_BUILD_TESTING "Enable Zlib Examples as tests" ON)
- option(ZLIB_BUILD_SHARED "Enable building zlib shared library" ON)
- option(ZLIB_BUILD_STATIC "Enable building zlib static library" ON)
-@@ -149,6 +153,35 @@ set(ZLIB_SRCS
-     uncompr.c
-     zutil.c)
- 
-+### === EXTERNAL CHANGES ===
-+function(add_sanitizers name)
-+    if(BUILD_WITH_SANITIZERS)
-+        set(compile_option_list "")
-+        set(compile_definition_list "")
-+        set(link_option_list "")
++function(configure_static_thirdparty_target target)
++	if(NOT TARGET "${target}")
++		message(FATAL_ERROR "Unknown target: ${target}")
++	endif()
 +
-+        list(APPEND compile_definition_list _DISABLE_STRING_ANNOTATION=1 _DISABLE_VECTOR_ANNOTATION=1)
++	get_property(enabled_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
 +
-+        if(MSVC)
-+            list(APPEND compile_option_list /fsanitize=address)
-+        else()
-+            if(WIN32)
-+                list(APPEND compile_option_list -fsanitize=address)
-+                list(APPEND link_option_list -fsanitize=address)
-+            else()
-+                list(APPEND compile_option_list -fsanitize=address,leak,undefined)
-+                list(APPEND link_option_list -fsanitize=address,leak,undefined)
-+            endif()
-+            list(APPEND compile_option_list -fno-sanitize-recover=all -fno-optimize-sibling-calls -fno-omit-frame-pointer)
-+        endif()
++	set(frontend_kind "")
++	set(compiler_description "")
 +
-+        target_compile_options(${name} PUBLIC ${compile_option_list})
-+        target_link_options(${name} PUBLIC ${link_option_list})
-+        target_compile_definitions(${name} PUBLIC ${compile_definition_list})
-+    endif()
++	foreach(language IN ITEMS C CXX)
++		if(NOT language IN_LIST enabled_languages)
++			continue()
++		endif()
++
++		set(id_variable "CMAKE_${language}_COMPILER_ID")
++		set(variant_variable
++		    "CMAKE_${language}_COMPILER_FRONTEND_VARIANT")
++
++		set(compiler_id "${${id_variable}}")
++		set(frontend_variant "${${variant_variable}}")
++
++		string(APPEND compiler_description
++		       " ${language}=${compiler_id}/${frontend_variant}")
++
++		if(compiler_id STREQUAL "MSVC"
++		   OR frontend_variant STREQUAL "MSVC")
++			set(current_frontend "MSVC")
++		elseif(compiler_id MATCHES "^(GNU|Clang|AppleClang)$")
++			set(current_frontend "GNU")
++		else()
++			continue()
++		endif()
++
++		if(frontend_kind
++		   AND NOT "${frontend_kind}" STREQUAL "${current_frontend}")
++			message(
++				FATAL_ERROR
++				"Mixed C/C++ compiler frontends are unsupported:"
++				"${compiler_description}"
++			)
++		endif()
++
++		set(frontend_kind "${current_frontend}")
++	endforeach()
++
++	if(NOT frontend_kind)
++		message(
++			FATAL_ERROR
++			"Unsupported C/C++ compiler:${compiler_description}"
++		)
++	endif()
++
++	if(frontend_kind STREQUAL "MSVC")
++		# Работает также для clang-cl.
++		set_property(
++			TARGET "${target}"
++			PROPERTY MSVC_RUNTIME_LIBRARY
++			         "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
++		)
++
++		target_compile_options(
++			"${target}"
++			PRIVATE
++				"$<$<CONFIG:Debug>:/Od>"
++				"$<$<CONFIG:Debug>:/Ob0>"
++				"$<$<CONFIG:Debug>:/Z7>"
++		)
++
++		if(CMAKE_SIZEOF_VOID_P EQUAL 4)
++			target_compile_options(
++				"${target}"
++				PRIVATE "$<$<CONFIG:Debug>:/Oy->"
++			)
++		endif()
++
++		target_link_options(
++			"${target}"
++			INTERFACE
++				"$<$<CONFIG:Debug>:/DEBUG:FULL>"
++				"$<$<CONFIG:Debug>:/INCREMENTAL:NO>"
++		)
++
++		if(BUILD_WITH_SANITIZERS)
++			target_compile_options(
++				"${target}"
++				PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address>"
++			)
++			target_link_options(
++				"${target}"
++				INTERFACE "$<$<CONFIG:Debug>:/fsanitize=address>"
++			)
++		endif()
++
++	elseif(frontend_kind STREQUAL "GNU")
++		set(debug_information_option -g)
++
++		if(WIN32 AND compiler_description MATCHES "Clang")
++			set(debug_information_option -gcodeview)
++		endif()
++
++		target_compile_options(
++			"${target}"
++			PRIVATE
++				"$<$<CONFIG:Debug>:-O0>"
++				"$<$<CONFIG:Debug>:${debug_information_option}>"
++				"$<$<CONFIG:Debug>:-fno-omit-frame-pointer>"
++				"$<$<CONFIG:Debug>:-fno-optimize-sibling-calls>"
++				"$<$<CONFIG:Debug>:-fno-inline>"
++		)
++
++		if(BUILD_WITH_SANITIZERS)
++			set(enabled_sanitizers address)
++
++			if(NOT WIN32)
++				list(APPEND enabled_sanitizers leak undefined)
++			endif()
++
++			target_compile_options(
++				"${target}"
++				PRIVATE
++					"$<$<CONFIG:Debug>:-fno-sanitize-recover=all>"
++			)
++
++			foreach(sanitizer IN LISTS enabled_sanitizers)
++				target_compile_options(
++					"${target}"
++					PRIVATE
++						"$<$<CONFIG:Debug>:-fsanitize=${sanitizer}>"
++				)
++				target_link_options(
++					"${target}"
++					INTERFACE
++						"$<$<CONFIG:Debug>:-fsanitize=${sanitizer}>"
++				)
++			endforeach()
++		endif()
++	endif()
 +endfunction()
-+### === EXTERNAL CHANGES ===
++# end of third-party builds patch
 +
- if(WIN32)
-     set(zlib_static_suffix "s")
-     set(CMAKE_DEBUG_POSTFIX "d")
-@@ -220,6 +253,9 @@ if(ZLIB_BUILD_STATIC)
+ # ============================================================================
+ # CPack
+ # ============================================================================
+@@ -220,6 +364,9 @@ if(ZLIB_BUILD_STATIC)
      set_target_properties(
          zlibstatic PROPERTIES EXPORT_NAME ZLIBSTATIC OUTPUT_NAME
                                                       z${zlib_static_suffix})
-+### === EXTERNAL CHANGES ===
-+    add_sanitizers(zlibstatic)
-+### === EXTERNAL CHANGES ===
++# Begin of third-party builds patch
++    configure_static_thirdparty_target(zlibstatic)
++# end of third-party builds patch
  endif(ZLIB_BUILD_STATIC)
  
  if(ZLIB_INSTALL)
